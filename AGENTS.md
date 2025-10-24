@@ -1,45 +1,40 @@
-#!/bin/bash
-# Enforce a simple Conventional Commits style on the first line of commit messages.
-# Accepts: type(scope): subject  or  type: subject
-# Allowed types: feat, fix, chore, docs, refactor, test, perf, style
+# AGENTS.md
 
-MSG_FILE="$1"
-if [ -z "$MSG_FILE" ]; then
-  echo "commit-msg hook: no message file provided"
-  exit 0
-fi
+## File naming conventions & file header
 
-# Read only the first line of the commit message
-FIRST_LINE=$(sed -n '1p' "$MSG_FILE" | tr -d '\r')
+Keep file names predictable and consistent across the repo. When creating new files include a small header comment with author, creation date, filename and module name.
 
-# Regex explanation:
-# ^(feat|fix|chore|docs|refactor|test|perf|style)    -> allowed type
-# (\([a-z0-9_/-]+\))?                            -> optional scope with lowercase/nums/hyphen/underscore/slash
-# :[[:space:]]+                                       -> colon + one or more whitespace characters (POSIX-compatible)
-# .{1,}                                              -> subject (at least 1 char)
+Simple rules:
 
-if [[ ! "$FIRST_LINE" =~ ^(feat|fix|chore|docs|refactor|test|perf|style)(\([a-z0-9_/-]+\))?:[[:space:]]+.+ ]]; then
-  cat <<EOF
-ERROR: Invalid commit message format.
+- Swift source files: use PascalCase and match the main type or view inside the file. Examples:
+  - `ContentView.swift`, `PlantViewModel.swift`, `AddPlantView.swift`
+- Resource files (assets, JSON, scripts): use lowercase, hyphen-separated. Examples:
+  - `colors.json`, `plant-data.json`, `image-assets.xcassets`
+- Test files: mirror the target file name and append `Tests` (or `UITests`) as appropriate. Examples:
+  - `PlantViewModelTests.swift`, `NurseryAppUITests.swift`
+- Keep file names short and descriptive. Avoid spaces and special characters.
 
-Expected: <type>(<scope>): <subject>
- - type: feat, fix, chore, docs, refactor, test, perf, style
- - scope: optional, lowercase, can include numbers, hyphens, underscores, or slashes
- - subject: short imperative description
+File header template
 
-Examples:
-  feat(ui): add plant list
-  fix: correct typo in README
+- Add a header at the top of each new source file (Swift example shown). Replace placeholders as appropriate.
 
-Please update your commit message.
-EOF
-  exit 1
-fi
+Swift example header (add to top of new .swift files):
 
-# Optionally, enforce subject length (first line) <= 72 chars
-if [ ${#FIRST_LINE} -gt 72 ]; then
-  echo "ERROR: Commit message subject is longer than 72 characters (current: ${#FIRST_LINE}). Please keep it concise."
-  exit 1
-fi
+```swift
+//  FileName.swift
+//  ModuleName
+//
+//  Created by Sumit Kumar on YYYY/MM/DD.
+//  Copyright © 2025 Grid Dynamics. All rights reserved.
+```
 
-exit 0
+Notes:
+- Use the actual creation date in `YYYY/MM/DD` format (or your preferred consistent format).
+- `FileName.swift` should match the saved filename. `ModuleName` is the Xcode module or target name (e.g., `NurseryApp`).
+- For non-Swift files place a short one-line header with author and date if it makes sense (for scripts, configs, etc.).
+
+Quick summary
+
+- Branch naming: keep using `type/area/short-description` (see Git conventions above)
+- File names: PascalCase for Swift, kebab-case for assets/resources, mirror names for tests
+- File header: always include Created by Sumit Kumar, date, filename and module name at file top
