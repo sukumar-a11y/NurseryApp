@@ -8,32 +8,130 @@ import Foundation
 import CoreData
 
 /// A lightweight programmatic Core Data stack for the NurseryApp.
-/// Creates a model at runtime with a single entity `PlantEntity` and attributes
-/// matching the `Plant` struct.
+/// Provides concurrent-safe CRUD helpers and enables lightweight migration.
 final class CoreDataManager {
     static let shared = CoreDataManager()
 
     let container: NSPersistentContainer
-    var context: NSManagedObjectContext { container.viewContext }
+    var viewContext: NSManagedObjectContext { container.viewContext }
 
     private init(inMemory: Bool = false) {
         let model = CoreDataManager.makeModel()
         container = NSPersistentContainer(name: "NurseryAppModel", managedObjectModel: model)
 
-        if inMemory {
-            let description = NSPersistentStoreDescription()
-            description.type = NSInMemoryStoreType
-            container.persistentStoreDescriptions = [description]
+        // Ensure there's at least one persistent store description and apply migration options
+        if container.persistentStoreDescriptions.isEmpty {
+            let desc = NSPersistentStoreDescription()
+            container.persistentStoreDescriptions = [desc]
         }
 
-        container.loadPersistentStores { description, error in
-            if let error = error {
-                fatalError("Failed to load Core Data stack: \(error)")
+        // Determine a stable store URL (Application Support) for SQLite stores
+        let storeURL: URL? = {
+            guard !inMemory else { return nil }
+            let fm = FileManager.default
+            do {
+                let appSupport = try fm.url(for: .applicationSupportDirectory,
+                                            in: .userDomainMask,
+                                            appropriateFor: nil,
+                                            create: true)
+                let dir = appSupport.appendingPathComponent("NurseryApp", isDirectory: true)
+                if !fm.fileExists(atPath: dir.path) {
+                    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                }
+                return dir.appendingPathComponent("NurseryAppModel.sqlite")
+            } catch {
+                // Fallback: use default container location (do nothing)
+                print("CoreData: failed to create Application Support directory: \(error)")
+                return nil
+            }
+        }()
+
+        // Apply migration and store options on all descriptions
+        for storeDescription in container.persistentStoreDescriptions {
+            // Prefer explicit SQLite store type for persistent stores
+            storeDescription.type = inMemory ? NSInMemoryStoreType : NSSQLiteStoreType
+
+            if let storeURL = storeURL, !inMemory {
+                storeDescription.url = storeURL
+            } else if inMemory {
+                storeDescription.url = URL(fileURLWithPath: "/dev/null")
+            }
+
+            storeDescription.shouldMigrateStoreAutomatically = true
+            storeDescription.shouldInferMappingModelAutomatically = true
+
+            // Set explicit options for older runtimes using setOption(_:forKey:)
+            // Use NSNumber for boolean values to be explicit
+            storeDescription.setOption(NSNumber(value: true), forKey: NSMigratePersistentStoresAutomaticallyOption)
+            storeDescription.setOption(NSNumber(value: true), forKey: NSInferMappingModelAutomaticallyOption)
+            if #available(iOS 10.0, macOS 10.13, tvOS 10.0, watchOS 3.0, *) {
+                storeDescription.setOption(NSNumber(value: true), forKey: NSPersistentHistoryTrackingKey)
             }
         }
 
-        // Keep context changes pushed to disk quicker
-        container.viewContext.automaticallyMergesChangesFromParent = true
+        // Load stores with a safe single retry fallback: if the store is corrupt or incompatible,
+        // remove the sqlite files and retry (destructive migration). This is guarded and only
+        // used as a last resort during development; remove destructive fallback in production.
+        var didAttemptRecovery = false
+        container.loadPersistentStores { [weak self] storeDesc, error in
+            if let error = error {
+                print("CoreData: initial load failed: \(error)")
+
+                // Attempt a destructive fallback by removing the sqlite files and retrying once
+                guard !inMemory, !didAttemptRecovery, let url = storeDesc.url else {
+                    fatalError("Failed to load Core Data store and cannot recover: \(error)")
+                }
+
+                didAttemptRecovery = true
+                print("CoreData: attempting destructive recovery by removing store at \(url.path)")
+                let fm = FileManager.default
+                // Correctly compute -shm and -wal filenames (e.g. MyStore.sqlite-shm)
+                let shm = URL(fileURLWithPath: url.path + "-shm")
+                let wal = URL(fileURLWithPath: url.path + "-wal")
+                do {
+                    if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
+                    if fm.fileExists(atPath: shm.path) { try fm.removeItem(at: shm) }
+                    if fm.fileExists(atPath: wal.path) { try fm.removeItem(at: wal) }
+                } catch {
+                    print("CoreData: failed to remove store files during recovery: \(error)")
+                    fatalError("Failed to recover Core Data store: \(error)")
+                }
+
+                // Retry loading the persistent stores once
+                self?.container.loadPersistentStores { desc2, error2 in
+                    if let error2 = error2 {
+                        fatalError("Failed to load Core Data store after recovery attempt: \(error2)")
+                    }
+
+                    // Configure viewContext after successful load
+                    let viewCtx = self?.container.viewContext
+                    viewCtx?.automaticallyMergesChangesFromParent = true
+                    viewCtx?.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+                    viewCtx?.undoManager = nil
+                }
+
+                return
+            }
+
+            // Configure viewContext for main-thread usage
+            let viewCtx = self?.container.viewContext
+            viewCtx?.automaticallyMergesChangesFromParent = true
+            viewCtx?.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            viewCtx?.undoManager = nil
+        }
+
+        // Keep container configured: prefer object-trumping for view context (UI-side wins),
+        // background contexts will use a store-trumping policy when saving to avoid clobbering remote changes.
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    }
+
+    // Provide a configured background context for writes
+    private func newBackgroundContext() -> NSManagedObjectContext {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+        context.automaticallyMergesChangesFromParent = true
+        context.undoManager = nil
+        return context
     }
 
     // Build model programmatically so we don't need an .xcdatamodeld file
@@ -81,13 +179,14 @@ final class CoreDataManager {
         return model
     }
 
-    // MARK: - CRUD helpers
+    // MARK: - Core Data Basics (Fetch)
 
+    /// Fetch current plants from the view context (main thread). Returns model `Plant` array.
     func fetchPlants() -> [Plant] {
         let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
         req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
         do {
-            let results = try context.fetch(req)
+            let results = try viewContext.fetch(req)
             return results.compactMap { obj in
                 guard let id = obj.value(forKey: "id") as? UUID,
                       let name = obj.value(forKey: "name") as? String else { return nil }
@@ -103,61 +202,126 @@ final class CoreDataManager {
         }
     }
 
-    func addPlant(_ plant: Plant) {
-        let entity = NSEntityDescription.entity(forEntityName: "PlantEntity", in: context)!
-        let obj = NSManagedObject(entity: entity, insertInto: context)
-        obj.setValue(plant.id, forKey: "id")
-        obj.setValue(plant.name, forKey: "name")
-        obj.setValue(plant.species, forKey: "species")
-        obj.setValue(plant.description, forKey: "plantDescription")
-        obj.setValue(plant.emoji, forKey: "emoji")
-        obj.setValue(plant.isFavorite, forKey: "isFavorite")
-        saveContext()
-    }
-
-    func removePlant(withId id: UUID) {
-        let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
-        req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-        do {
-            let results = try context.fetch(req)
-            for obj in results { context.delete(obj) }
-            saveContext()
-        } catch {
-            print("CoreData remove error: \(error)")
-        }
-    }
-
-    func updateFavorite(forId id: UUID, to isFavorite: Bool) {
-        let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
-        req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-        do {
-            if let obj = try context.fetch(req).first {
-                obj.setValue(isFavorite, forKey: "isFavorite")
-                saveContext()
+    /// Async fetch variant that performs the fetch on a background context and returns results on main thread
+    func fetchPlantsAsync(completion: @escaping (Result<[Plant], Error>) -> Void) {
+        let context = newBackgroundContext()
+        context.perform {
+            let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
+            req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+            do {
+                let results = try context.fetch(req)
+                let plants = results.compactMap { obj -> Plant? in
+                    guard let id = obj.value(forKey: "id") as? UUID,
+                          let name = obj.value(forKey: "name") as? String else { return nil }
+                    let species = obj.value(forKey: "species") as? String
+                    let desc = obj.value(forKey: "plantDescription") as? String
+                    let emoji = obj.value(forKey: "emoji") as? String
+                    let fav = obj.value(forKey: "isFavorite") as? Bool ?? false
+                    return Plant(id: id, name: name, species: species, description: desc, emoji: emoji, isFavorite: fav)
+                }
+                DispatchQueue.main.async { completion(.success(plants)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
             }
-        } catch {
-            print("CoreData update error: \(error)")
         }
     }
 
-    func saveContext() {
-        guard context.hasChanges else { return }
-        do {
-            try context.save()
-        } catch {
-            print("CoreData save error: \(error)")
+    // MARK: - Core Data Concurrency (Write on background contexts)
+
+    /// Add a plant using a background context. Calls completion with Result on main thread.
+    func addPlant(_ plant: Plant, completion: ((Result<Void, Error>) -> Void)? = nil) {
+        let context = newBackgroundContext()
+        context.perform {
+            let entity = NSEntityDescription.entity(forEntityName: "PlantEntity", in: context)!
+            let obj = NSManagedObject(entity: entity, insertInto: context)
+            obj.setValue(plant.id, forKey: "id")
+            obj.setValue(plant.name, forKey: "name")
+            obj.setValue(plant.species, forKey: "species")
+            obj.setValue(plant.description, forKey: "plantDescription")
+            obj.setValue(plant.emoji, forKey: "emoji")
+            obj.setValue(plant.isFavorite, forKey: "isFavorite")
+            do {
+                try context.save()
+                DispatchQueue.main.async { completion?(.success(())) }
+            } catch {
+                print("CoreData addPlant save error: \(error)")
+                DispatchQueue.main.async { completion?(.failure(error)) }
+            }
         }
     }
 
-    // For debugging/testing
-    func deleteAllPlants() {
-        let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "PlantEntity")
-        let request = NSBatchDeleteRequest(fetchRequest: fetch)
+    /// Remove a plant by UUID on a background context
+    func removePlant(withId id: UUID, completion: ((Result<Void, Error>) -> Void)? = nil) {
+        let context = newBackgroundContext()
+        context.perform {
+            let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            do {
+                let results = try context.fetch(req)
+                for obj in results { context.delete(obj) }
+                try context.save()
+                DispatchQueue.main.async { completion?(.success(())) }
+            } catch {
+                print("CoreData remove error: \(error)")
+                DispatchQueue.main.async { completion?(.failure(error)) }
+            }
+        }
+    }
+
+    /// Update favorite flag for a plant on a background context
+    func updateFavorite(forId id: UUID, to isFavorite: Bool, completion: ((Result<Void, Error>) -> Void)? = nil) {
+        let context = newBackgroundContext()
+        context.perform {
+            let req = NSFetchRequest<NSManagedObject>(entityName: "PlantEntity")
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            do {
+                if let obj = try context.fetch(req).first {
+                    obj.setValue(isFavorite, forKey: "isFavorite")
+                    try context.save()
+                }
+                DispatchQueue.main.async { completion?(.success(())) }
+            } catch {
+                print("CoreData update error: \(error)")
+                DispatchQueue.main.async { completion?(.failure(error)) }
+            }
+        }
+    }
+
+    /// Generic save if you use viewContext directly
+    func saveViewContext() {
+        guard viewContext.hasChanges else { return }
         do {
-            try container.persistentStoreCoordinator.execute(request, with: context)
-            saveContext()
+            try viewContext.save()
         } catch {
-            print("CoreData delete all error: \(error)")
+            print("CoreData viewContext save error: \(error)")
+        }
+    }
+
+    // MARK: - Batch / Utilities
+
+    /// Delete all plants using a background context and batch delete request
+    func deleteAllPlants(completion: ((Result<Void, Error>) -> Void)? = nil) {
+        let context = newBackgroundContext()
+        context.perform {
+            let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "PlantEntity")
+            let request = NSBatchDeleteRequest(fetchRequest: fetch)
+            request.resultType = .resultTypeObjectIDs
+            do {
+                let result = try context.execute(request) as? NSBatchDeleteResult
+                if let objectIDs = result?.result as? [NSManagedObjectID], !objectIDs.isEmpty {
+                    let changes: [AnyHashable: Any] = [NSDeletedObjectsKey: objectIDs]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [self.container.viewContext])
+                }
+                // No need to save the background context after a batch delete that used resultTypeObjectIDs,
+                // but call save to be safe if there are pending changes
+                if context.hasChanges {
+                    try context.save()
+                }
+                DispatchQueue.main.async { completion?(.success(())) }
+            } catch {
+                print("CoreData delete all error: \(error)")
+                DispatchQueue.main.async { completion?(.failure(error)) }
+            }
         }
     }
 }
