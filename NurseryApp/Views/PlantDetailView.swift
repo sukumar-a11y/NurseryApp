@@ -11,6 +11,7 @@ struct PlantDetailView: View {
     let plant: Plant
     var namespace: Namespace.ID
     var onClose: (() -> Void)? = nil
+    var onToggleFavorite: (() -> Void)? = nil
 
     var body: some View {
         ScrollView {
@@ -43,16 +44,31 @@ struct PlantDetailView: View {
                     }
                     .padding()
 
-                    // Close button
-                    Button(action: {
-                        onClose?()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(Color.black.opacity(0.6))
-                            .padding(8)
+                    HStack(spacing: 8) {
+                        // Favorite button
+                        Button(action: {
+                            onToggleFavorite?()
+                        }) {
+                            Image(systemName: plant.isFavorite ? "heart.fill" : "heart")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(plant.isFavorite ? .red : .secondary)
+                                .padding(8)
+                                .background(Color(.systemBackground).opacity(0.6))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+
+                        // Close button
+                        Button(action: {
+                            onClose?()
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                                .padding(8)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(8)
                 }
                 .padding(.horizontal)
@@ -93,10 +109,10 @@ struct PlantDetailView_Previews: PreviewProvider {
         var body: some View {
             PlantDetailView(
                 plant: Plant(name: "Monstera", species: "Monstera deliciosa", description: "Sample description about the Monstera plant. It likes bright, indirect light.", emoji: "🪴"),
-                namespace: ns
-            ) {
-                // preview close
-            }
+                namespace: ns,
+                onClose: {},
+                onToggleFavorite: {}
+            )
         }
     }
 }

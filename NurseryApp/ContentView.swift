@@ -32,6 +32,8 @@ struct PlantListView: View {
     // Namespace & selected plant for matched geometry animation
     @Namespace private var namespace
     @State private var selectedPlant: Plant? = nil
+    // Plant pending deletion (set by long-press)
+    @State private var plantToDelete: Plant? = nil
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
 
@@ -82,7 +84,10 @@ struct PlantListView: View {
 
                             LazyVGrid(columns: gridItems, spacing: spacing) {
                                 ForEach(viewModel.plants) { plant in
-                                    PlantCardView(plant: plant, namespace: namespace)
+                                    PlantCardView(plant: plant, namespace: namespace) {
+                                        // toggle favorite via view model
+                                        viewModel.toggleFavorite(plant: plant)
+                                    }
                                         .frame(width: cellSize, height: cellSize)
                                         .contextMenu {
                                             Button(role: .destructive) {
@@ -90,6 +95,10 @@ struct PlantListView: View {
                                             } label: {
                                                 Label("Delete", systemImage: "trash")
                                             }
+                                        }
+                                        // Long-press to request deletion with confirmation
+                                        .onLongPressGesture(minimumDuration: 0.6) {
+                                            plantToDelete = plant
                                         }
                                         .onTapGesture {
                                             withAnimation(.interactiveSpring(response: 0.45, dampingFraction: 0.8, blendDuration: 0.25)) {
@@ -118,9 +127,15 @@ struct PlantListView: View {
                             }
 
                         // Place the detail view using the same namespace so matchedGeometryEffect works
-                        PlantDetailView(plant: plant, namespace: namespace) {
+                        PlantDetailView(plant: plant, namespace: namespace, onClose: {
                             withAnimation(.spring()) { selectedPlant = nil }
-                        }
+                        }, onToggleFavorite: {
+                            viewModel.toggleFavorite(plant: plant)
+                            // refresh the selectedPlant copy so the overlay reflects the updated favorite state
+                            if let updated = viewModel.plant(withId: plant.id) {
+                                selectedPlant = updated
+                            }
+                        })
                         .zIndex(1)
                         .padding(.horizontal, 12)
                         .transition(.opacity.combined(with: .scale))
@@ -149,7 +164,26 @@ struct PlantListView: View {
             }
             .navigationDestination(for: Plant.self) { plant in
                 // keep existing navigation path for deep-linking; if using zoom overlay the regular nav is still available
-                PlantDetailView(plant: plant, namespace: namespace) {}
+                PlantDetailView(plant: plant, namespace: namespace, onClose: {}, onToggleFavorite: {
+                    viewModel.toggleFavorite(plant: plant)
+                })
+            }
+            // Confirmation dialog for long-press delete
+            // The dialog is presented when `plantToDelete` is non-nil
+            .confirmationDialog("Are you sure you want to delete this plant?", isPresented: Binding(get: { plantToDelete != nil }, set: { present in if !present { plantToDelete = nil } })) {
+                Button("Delete", role: .destructive) {
+                    if let p = plantToDelete {
+                        viewModel.remove(plant: p)
+                        // If the deleted plant is currently selected in the overlay, clear it
+                        if selectedPlant?.id == p.id {
+                            selectedPlant = nil
+                        }
+                    }
+                    plantToDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    plantToDelete = nil
+                }
             }
         }
     }
@@ -159,6 +193,7 @@ struct PlantListView: View {
 private struct PlantCardView: View {
     let plant: Plant
     var namespace: Namespace.ID
+    var onToggleFavorite: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -193,9 +228,25 @@ private struct PlantCardView: View {
                 .matchedGeometryEffect(id: "card-\(plant.id.uuidString)", in: namespace)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.green.opacity(0.18), lineWidth: 0.5)
-                .matchedGeometryEffect(id: "cardstroke-\(plant.id.uuidString)", in: namespace)
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.green.opacity(0.18), lineWidth: 0.5)
+                    .matchedGeometryEffect(id: "cardstroke-\(plant.id.uuidString)", in: namespace)
+
+                // Favorite button in top-right of card
+                Button(action: {
+                    onToggleFavorite?()
+                }) {
+                    Image(systemName: plant.isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(plant.isFavorite ? .red : .secondary)
+                        .padding(8)
+                        .background(Color(.systemBackground).opacity(0.6))
+                        .clipShape(Circle())
+                        .padding(8)
+                }
+                .buttonStyle(.plain)
+            }
         )
     }
 }

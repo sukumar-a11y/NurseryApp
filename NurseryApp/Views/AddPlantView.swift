@@ -16,18 +16,48 @@ struct AddPlantView: View {
 
     var onSave: (Plant) -> Void
 
+    // Small curated emoji list for quick selection
+    private let emojiChoices: [String] = ["🪴","🌿","🌱","🌵","🍃","🌸","🎋","🍀","🌻","🌼","🌺","🥀","🌴","🪻","🌾"]
+
     var body: some View {
         NavigationStack {
             Form {
                 Section(header: Text("Basic")) {
                     TextField("Name", text: $name)
                     TextField("Species", text: $species)
+
                     HStack {
                         TextField("Emoji (e.g. 🪴)", text: $emoji)
                             .frame(width: 120)
                         Spacer()
                         Text(emoji)
                             .font(.largeTitle)
+                    }
+
+                    // Emoji picker: horizontal scroll of tappable emoji buttons
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(emojiChoices, id: \.self) { item in
+                                Button(action: {
+                                    emoji = item
+                                }) {
+                                    Text(item)
+                                        .font(.system(size: 28))
+                                        .frame(width: 44, height: 44)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(item == emoji ? Color.green.opacity(0.2) : Color.clear)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .stroke(item == emoji ? Color.green : Color.clear, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(Text("Select emoji \(item)"))
+                            }
+                        }
+                        .padding(.vertical, 6)
                     }
                 }
 
