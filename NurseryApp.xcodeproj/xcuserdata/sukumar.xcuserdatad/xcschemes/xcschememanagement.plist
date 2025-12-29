@@ -9,6 +9,34 @@
 			<key>orderHint</key>
 			<integer>0</integer>
 		</dict>
+		<key>NurseryAppTests.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>0</integer>
+		</dict>
+		<key>NurseryAppUITests.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>36D328382EA790E4008B6823</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>36D328452EA790E7008B6823</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>36D3284F2EA790E7008B6823</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
 	</dict>
 </dict>
 </plist>

@@ -32,6 +32,7 @@
 		36D328462EA790E7008B6823 /* NurseryAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NurseryAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		36D328502EA790E7008B6823 /* NurseryAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NurseryAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		36D3286B2EA79813008B6823 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
+		36F313D72EB0EE1A0093E106 /* NurseryApp.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = NurseryApp.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -80,6 +81,7 @@
 		36D328302EA790E4008B6823 = {
 			isa = PBXGroup;
 			children = (
+				36F313D72EB0EE1A0093E106 /* NurseryApp.xctestplan */,
 				36D3286B2EA79813008B6823 /* AGENTS.md */,
 				36D3283B2EA790E4008B6823 /* NurseryApp */,
 				36D328492EA790E7008B6823 /* NurseryAppTests */,

@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "84502116-3B37-49C2-807E-8583F1E81146",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:NurseryApp.xcodeproj",
+      "identifier" : "36D328382EA790E4008B6823",
+      "name" : "NurseryApp"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:NurseryApp.xcodeproj",
+        "identifier" : "36D328452EA790E7008B6823",
+        "name" : "NurseryAppTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:NurseryApp.xcodeproj",
+        "identifier" : "36D3284F2EA790E7008B6823",
+        "name" : "NurseryAppUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

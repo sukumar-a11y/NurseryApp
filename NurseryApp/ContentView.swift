@@ -190,7 +190,7 @@ struct PlantListView: View {
 }
 
 // Small card view used in the grid
-private struct PlantCardView: View {
+struct PlantCardView: View {
     let plant: Plant
     var namespace: Namespace.ID
     var onToggleFavorite: (() -> Void)? = nil

@@ -24,11 +24,14 @@ struct AddPlantView: View {
             Form {
                 Section(header: Text("Basic")) {
                     TextField("Name", text: $name)
+                        .accessibilityIdentifier("add_name")
                     TextField("Species", text: $species)
+                        .accessibilityIdentifier("add_species")
 
                     HStack {
                         TextField("Emoji (e.g. 🪴)", text: $emoji)
                             .frame(width: 120)
+                            .accessibilityIdentifier("add_emoji")
                         Spacer()
                         Text(emoji)
                             .font(.largeTitle)
@@ -55,6 +58,7 @@ struct AddPlantView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(Text("Select emoji \(item)"))
+                                .accessibilityIdentifier("emoji_\(item)")
                             }
                         }
                         .padding(.vertical, 6)
@@ -64,12 +68,14 @@ struct AddPlantView: View {
                 Section(header: Text("Notes")) {
                     TextEditor(text: $description)
                         .frame(minHeight: 100)
+                        .accessibilityIdentifier("add_description")
                 }
             }
             .navigationTitle("Add Plant")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                    .accessibilityIdentifier("add_cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -78,6 +84,7 @@ struct AddPlantView: View {
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("add_save")
                 }
             }
         }
