@@ -8,24 +8,24 @@ import Foundation
 
 final class PlantViewModel: ObservableObject {
     @Published private(set) var plants: [Plant] = []
+    private let coreData: CoreDataManager
 
-    init(sampleData: Bool = true) {
+    init(coreDataManager: CoreDataManager = CoreDataManager.shared, sampleData: Bool = true) {
+        self.coreData = coreDataManager
+
         // Load persisted plants from Core Data (synchronous snapshot from viewContext)
-        plants = CoreDataManager.shared.fetchPlants()
+        plants = coreData.fetchPlants()
 
         // If no persisted plants and sampleData requested, seed a few sample entries.
         if plants.isEmpty && sampleData {
             seedSampleData()
         }
 
-        // Optionally, listen for container.viewContext changes and refresh automatically.
-        // The CoreDataManager configures `automaticallyMergesChangesFromParent` so
-        // background saves are merged into viewContext, but we still refresh our
-        // plain-array representation when the context changes.
+        // Listen for container.viewContext changes and refresh automatically.
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(contextDidChange(_:)),
                                                name: .NSManagedObjectContextObjectsDidChange,
-                                               object: CoreDataManager.shared.viewContext)
+                                               object: coreData.viewContext)
     }
 
     deinit {
@@ -36,38 +36,56 @@ final class PlantViewModel: ObservableObject {
         // Refresh the simple array model on main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.plants = CoreDataManager.shared.fetchPlants()
+            self.plants = self.coreData.fetchPlants()
         }
     }
 
-    func add(_ plant: Plant) {
+    func add(_ plant: Plant, completion: (() -> Void)? = nil) {
+        // Optimistically insert locally so UI/tests see the new plant immediately
+        DispatchQueue.main.async { [weak self] in
+            self?.plants.append(plant)
+        }
+
         // Persist asynchronously and refresh when done
-        CoreDataManager.shared.addPlant(plant) { [weak self] _ in
+        coreData.addPlant(plant) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.plants = CoreDataManager.shared.fetchPlants()
+                self?.plants = self?.coreData.fetchPlants() ?? []
+                completion?()
             }
         }
     }
 
-    func remove(at offsets: IndexSet) {
-        // Remove from persistent store for each selected index
+    func remove(at offsets: IndexSet, completion: (() -> Void)? = nil) {
+        // Capture IDs to remove and perform optimistic local deletion on main thread
         let idsToRemove = offsets.compactMap { plants[$0].id }
+        DispatchQueue.main.async { [weak self] in
+            self?.plants.remove(atOffsets: offsets)
+        }
+
         let group = DispatchGroup()
         for id in idsToRemove {
             group.enter()
-            CoreDataManager.shared.removePlant(withId: id) { _ in
+            coreData.removePlant(withId: id) { _ in
                 group.leave()
             }
         }
         group.notify(queue: .main) { [weak self] in
-            self?.plants = CoreDataManager.shared.fetchPlants()
+            // Refresh from Core Data to ensure consistency
+            self?.plants = self?.coreData.fetchPlants() ?? []
+            completion?()
         }
     }
 
-    func remove(plant: Plant) {
-        CoreDataManager.shared.removePlant(withId: plant.id) { [weak self] _ in
+    func remove(plant: Plant, completion: (() -> Void)? = nil) {
+        // Optimistic local remove
+        DispatchQueue.main.async { [weak self] in
+            self?.plants.removeAll(where: { $0.id == plant.id })
+        }
+
+        coreData.removePlant(withId: plant.id) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.plants = CoreDataManager.shared.fetchPlants()
+                self?.plants = self?.coreData.fetchPlants() ?? []
+                completion?()
             }
         }
     }
@@ -82,13 +100,14 @@ final class PlantViewModel: ObservableObject {
     }
 
     // Toggle favorite state for a specific plant
-    func toggleFavorite(plant: Plant) {
+    func toggleFavorite(plant: Plant, completion: (() -> Void)? = nil) {
         guard let idx = plants.firstIndex(where: { $0.id == plant.id }) else { return }
         plants[idx].isFavorite.toggle()
         // Persist the change and refresh when done
-        CoreDataManager.shared.updateFavorite(forId: plant.id, to: plants[idx].isFavorite) { [weak self] _ in
+        coreData.updateFavorite(forId: plant.id, to: plants[idx].isFavorite) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.plants = CoreDataManager.shared.fetchPlants()
+                self?.plants = self?.coreData.fetchPlants() ?? []
+                completion?()
             }
         }
     }
@@ -104,12 +123,12 @@ final class PlantViewModel: ObservableObject {
         let group = DispatchGroup()
         for p in samples {
             group.enter()
-            CoreDataManager.shared.addPlant(p) { _ in
+            coreData.addPlant(p) { _ in
                 group.leave()
             }
         }
         group.notify(queue: .main) { [weak self] in
-            self?.plants = CoreDataManager.shared.fetchPlants()
+            self?.plants = self?.coreData.fetchPlants() ?? []
         }
     }
 }
